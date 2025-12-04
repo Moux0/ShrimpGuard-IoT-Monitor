@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShrimpGuard: Smart Water Monitor</title>
+    <style>
+        :root {
+            --primary: #0078D4; /* Power BI Blue */
+            --danger: #D83B01;
+            --success: #107C10;
+            --bg: #f0f2f5;
+        }
+        
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg);
+            color: #333;
+        }
+
+        /* HEADER */
+        header {
+            background: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
+        .status { 
+            background: #e6f7ff; color: var(--primary); 
+            padding: 5px 15px; border-radius: 20px; font-weight: 600;
+        }
+
+        /* MAIN LAYOUT */
+        main {
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 3fr 1fr; /* Dashboard gets 75%, Controls get 25% */
+            gap: 20px;
+            height: 85vh;
+        }
+
+        /* RESPONSIVE: On phones, stack them */
+        @media (max-width: 768px) {
+            main { grid-template-columns: 1fr; height: auto; }
+            iframe { height: 500px; }
+        }
+
+        /* DASHBOARD CONTAINER */
+        .dashboard-box {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            height: 100%;
+        }
+
+        iframe { width: 100%; height: 100%; border: none; }
+
+        /* CONTROL PANEL (IoT Simulator) */
+        .control-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        h3 { margin-top: 0; color: #444; }
+        
+        label { font-weight: 600; font-size: 0.9rem; margin-bottom: -10px; }
+        
+        select, input {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 100%;
+            box-sizing: border-box; /* Fixes padding width issues */
+        }
+
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-top: 10px;
+        }
+
+        button:hover { background: #005a9e; }
+
+        .log-area {
+            margin-top: auto;
+            background: #252526;
+            color: #00ff00;
+            font-family: monospace;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            height: 150px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">🦐 ShrimpGuard IoT</div>
+        <div class="status">System Online</div>
+    </header>
+
+    <main>
+        <div class="dashboard-box">
+            <iframe 
+                title="Shrimp Report" 
+                src="https://app.powerbi.com/reportEmbed?reportId=fa008d23-13a5-469e-9c19-6842a0871673&autoAuth=true&ctid=fedd5298-8e66-45f1-b321-fd38ad0ff722" 
+                allowFullScreen="true">
+            </iframe>
+        </div>
+
+        <div class="control-panel">
+            <h3>📡 Inject Sensor Data</h3>
+            <p style="font-size: 0.85rem; color: #666;">
+                Simulate a new reading to test the Toxic Event algorithm.
+            </p>
+            
+            <label>Pond ID</label>
+            <select id="pondId">
+                <option value="Station_A">Station A</option>
+                <option value="Station_B">Station B</option>
+                <option value="Station_C">Station C</option>
+            </select>
+
+            <label>Ammonia (NH3) mg/L</label>
+            <input type="number" id="nh3" placeholder="Normal: 0.2, Toxic: >1.5" step="0.1">
+
+            <label>Dissolved Oxygen (DO) mg/L</label>
+            <input type="number" id="do" placeholder="Normal: 6.5, Toxic: <1.5" step="0.1">
+
+            <button onclick="sendData()">Upload to Cloud</button>
+
+            <div class="log-area" id="consoleLog">
+                > Waiting for input...
+            </div>
+        </div>
+    </main>
+
+   <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, serverTimestamp } 
+            from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+        // 2. YOUR FIREBASE CONFIGURATION (I pasted your keys here for you)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHOXG0FpR9IbbPkZtSKNzcVRJr2MdzjC4",
+            authDomain: "shrimpguard-project.firebaseapp.com",
+            projectId: "shrimpguard-project",
+            storageBucket: "shrimpguard-project.firebasestorage.app",
+            messagingSenderId: "644215662308",
+            appId: "1:644215662308:web:38c1c5f7bcdede71d46ef1"
+        };
+
+        // 3. Initialize Firebase & Database
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // 4. The Logic to Send Data (The "Brain" of the button)
+        window.sendData = async function() {
+            // Get Values from Inputs
+            const pond = document.getElementById('pondId').value;
+            const nh3 = parseFloat(document.getElementById('nh3').value);
+            const doVal = parseFloat(document.getElementById('do').value);
+            const logger = document.getElementById('consoleLog');
+
+            // Validation check
+            if (isNaN(nh3) || isNaN(doVal)) {
+                alert("Please enter both Ammonia and DO values!");
+                return;
+            }
+
+            // Button Feedback
+            const btn = document.querySelector('button');
+            const originalText = btn.innerText;
+            btn.innerText = "Sending...";
+            btn.disabled = true;
+
+            try {
+                // Determine Risk Status (CLO-1 Logic)
+                let riskStatus = "SAFE";
+                if (nh3 > 1.5 || doVal < 1.5) {
+                    riskStatus = "CRITICAL (TOXIC EVENT)";
+                }
+
+                // WRITE TO FIREBASE CLOUD
+                const docRef = await addDoc(collection(db, "sensor_readings"), {
+                    pond_id: pond,
+                    ammonia_level: nh3,
+                    do_level: doVal,
+                    risk_status: riskStatus,
+                    timestamp: serverTimestamp() // Official Server Time
+                });
+
+                // Success Message
+                const timestamp = new Date().toLocaleTimeString();
+                const newLog = `> [${timestamp}] SUCCESS! \n  ID: ${docRef.id} \n  Pond: ${pond} | NH3: ${nh3} \n  Status: ${riskStatus} \n  >> Saved to Cloud ☁️\n`;
+                
+                logger.innerText = newLog + "\n" + logger.innerText;
+                alert("Data Saved to Google Firestore!");
+
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                alert("Error sending data. Check console (F12).");
+                logger.innerText = `> [Error] ${e.message}\n` + logger.innerText;
+            }
+
+            // Reset Button
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    </script>
+</body>
+</html>
